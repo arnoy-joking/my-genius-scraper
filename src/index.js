@@ -22,7 +22,6 @@ export default {
     try {
       const response = await fetch(targetUrl, {
         headers: {
-          // Robust User-Agent to look like a real browser
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
           'Referer': 'https://www.google.com/',
@@ -39,26 +38,17 @@ export default {
       
       let lyrics = '';
 
-      // 1. Primary Selector: This is the specific container for lyrics text
       const containers = $('[data-lyrics-container="true"]');
 
       if (containers.length > 0) {
         containers.each((i, el) => {
           const block = $(el);
-          
-          // Replace <br> tags with newlines
           block.find('br').replaceWith('\n');
-          
-          // Remove potential ad/empty divs inside the lyrics container
           block.find('div[class*="Defered"]').remove();
           block.find('div[class*="Inread"]').remove();
-          
-          // Get text
           lyrics += block.text() + '\n\n';
         });
       } else {
-        // Fallback: If data-lyrics-container is missing, try scraping generic lyric classes
-        // (This is rare but happens on older pages)
         $('.lyrics, div[class*="Lyrics__Container"]').each((i, el) => {
            const block = $(el);
            block.find('br').replaceWith('\n');
@@ -70,19 +60,23 @@ export default {
         return new Response('Error: Lyrics not found', { status: 404, headers: corsHeaders });
       }
 
-      // --- CLEANING SECTION ---
-      let cleanLyrics = lyrics
-        .replace(/[\u200B-\u200D\uFEFF]/g, '') // Remove zero-width spaces
-        
-        // FIX: Remove the "Contributors/Translations" header junk
-        // This Regex looks for the pattern where "Contributors" and "Lyrics" text appear before the first bracket [
-        .replace(/^.*?Contributors.*?Lyrics\s*(?=\[)/s, '') 
-        .replace(/^.*?Translations.*?Lyrics\s*(?=\[)/s, '')
-        
-        // Ensure headers like [Verse 1] have a newline before them
+      // --- IMPROVED CLEANING SECTION ---
+      let cleanLyrics = lyrics.replace(/[\u200B-\u200D\uFEFF]/g, ''); // Zero-width spaces
+
+      // 1. Remove everything before the first square bracket '['
+      // This gets rid of "Contributors", "Translations", and Title text regardless of what words are used.
+      const firstBracketIndex = cleanLyrics.indexOf('[');
+      if (firstBracketIndex !== -1 && firstBracketIndex < 300) {
+          // We check < 300 chars to ensure we don't accidentally delete the whole song 
+          // if it happens to start with a verse without a header (very rare).
+          cleanLyrics = cleanLyrics.substring(firstBracketIndex);
+      }
+
+      // 2. Formatting fixes
+      cleanLyrics = cleanLyrics
+        // Ensure headers like [Verse 1] have a newline before them if glued to previous text
         .replace(/([^\n])(\[)/g, '$1\n\n$2')
-        
-        // Remove excessive newlines
+        // Remove excessive newlines (more than 2)
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 
