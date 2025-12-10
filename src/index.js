@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 
 export default {
   async fetch(request, env, ctx) {
+    // Standard CORS headers
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET,HEAD,POST,OPTIONS',
@@ -38,18 +39,32 @@ export default {
       
       let lyrics = '';
 
+      // Genius lyrics are in these specific containers
       const containers = $('[data-lyrics-container="true"]');
 
       if (containers.length > 0) {
         containers.each((i, el) => {
           const block = $(el);
-          block.find('br').replaceWith('\n');
+
+          // --- CRITICAL FIX ---
+          // Genius nests the "Contributors/Translations" header INSIDE the lyric container.
+          // We must remove any element with this attribute before extracting text.
+          block.find('[data-exclude-from-selection="true"]').remove();
+          
+          // Remove other known junk elements (ads, etc)
           block.find('div[class*="Defered"]').remove();
           block.find('div[class*="Inread"]').remove();
+          block.find('div[class*="ExpandableContent"]').remove(); // Sometimes "See More" buttons appear
+
+          // Replace <br> tags with newlines to preserve structure
+          block.find('br').replaceWith('\n');
+          
+          // Get text
           lyrics += block.text() + '\n\n';
         });
       } else {
-        $('.lyrics, div[class*="Lyrics__Container"]').each((i, el) => {
+        // Fallback for older pages
+        $('.lyrics').each((i, el) => {
            const block = $(el);
            block.find('br').replaceWith('\n');
            lyrics += block.text() + '\n\n';
@@ -60,23 +75,14 @@ export default {
         return new Response('Error: Lyrics not found', { status: 404, headers: corsHeaders });
       }
 
-      // --- IMPROVED CLEANING SECTION ---
-      let cleanLyrics = lyrics.replace(/[\u200B-\u200D\uFEFF]/g, ''); // Zero-width spaces
-
-      // 1. Remove everything before the first square bracket '['
-      // This gets rid of "Contributors", "Translations", and Title text regardless of what words are used.
-      const firstBracketIndex = cleanLyrics.indexOf('[');
-      if (firstBracketIndex !== -1 && firstBracketIndex < 300) {
-          // We check < 300 chars to ensure we don't accidentally delete the whole song 
-          // if it happens to start with a verse without a header (very rare).
-          cleanLyrics = cleanLyrics.substring(firstBracketIndex);
-      }
-
-      // 2. Formatting fixes
-      cleanLyrics = cleanLyrics
-        // Ensure headers like [Verse 1] have a newline before them if glued to previous text
+      // --- POST PROCESSING ---
+      let cleanLyrics = lyrics
+        .replace(/[\u200B-\u200D\uFEFF]/g, '') // Remove zero-width spaces
+        
+        // Ensure headers like [Verse 1] have a newline before them
         .replace(/([^\n])(\[)/g, '$1\n\n$2')
-        // Remove excessive newlines (more than 2)
+        
+        // Remove excessive newlines
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 
